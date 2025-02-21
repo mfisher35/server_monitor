@@ -5,7 +5,7 @@ require('dotenv').config();
 
 const CHECK_URLS = process.env.CHECK_URLS ? process.env.CHECK_URLS.split('|') : [];
 const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
-const ALERT_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+const ALERT_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
 
 // Track last alert timestamp for each URL
 let lastAlertTimestamps = {};
@@ -34,12 +34,12 @@ async function checkServer(url) {
         //console.error(`❌ Server check failed: ${url} - ${error.message}`);
         const now = Date.now();
 
-        // Check if 24 hours have passed since the last alert for this URL
+        // Check if 4 hours have passed since the last alert for this URL
         if (!lastAlertTimestamps[url] || now - lastAlertTimestamps[url] >= ALERT_INTERVAL) {
             sendAlertEmail(url, error.message);
             lastAlertTimestamps[url] = now;
         } else {
-            //console.log(`⚠️ Alert already sent for ${url} in the last 24 hours. Skipping email.`);
+            //console.log(`⚠️ Alert already sent for ${url} in the last 4 hours. Skipping email.`);
         }
     }
 }
