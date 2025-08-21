@@ -1,6 +1,7 @@
 const axios = require('axios');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
+const fs = require('fs');
 
 
 const CHECK_URLS = process.env.CHECK_URLS ? process.env.CHECK_URLS.split('|') : [];
@@ -20,12 +21,51 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+function checkValidator() {
+   var bData = [];
+   const unixTimestamp = Math.floor(Date.now() / 1000);
+   try {
+      fs.readFile('/usr/share/nginx/html/mini/current.txt', 'utf8', (err, data) => {
+         if (err) {
+            console.error('Error reading file:', err);
+            return;
+         }
+      bData = data.trim().split(" ");	     
+      officialBlock = parseInt(bData[0]);
+      myBlock = parseInt(bData[1]);
+      myTimestamp = parseInt(bData[2]);
+
+      if (myBlock < officialBlock) {
+            throw new Error('Mini server block age out of sync!');
+        }
+      else if (Math.abs(unixTimestamp-myTimestamp)/60 > 10) {
+            throw new Error('Mini server timed out! (10 minutes+)');
+        }
+      });
+
+    } catch (error) {
+
+        console.log(error)
+        //console.error(`❌ Server check failed: ${url} - ${error.message}`);
+        const now = Date.now();
+
+        // Check if 4 hours have passed since the last alert for this URL
+        if (!lastAlertTimestamps["miniserver"] || now - lastAlertTimestamps["miniserver"] >= ALERT_INTERVAL) {
+            sendAlertEmail("miniserver", error.message);
+            lastAlertTimestamps["miniserver"] = now;
+        } else {
+            //console.log(`⚠️ Alert already sent for ${url} in the last 4 hours. Skipping email.`);
+        }
+    }
+}
+
+
 async function checkServer(url) {
     try {
         const response = await axios.get(url, { timeout: 10000 }); // 10s timeout
         const data = response.data;
 
-        if (typeof data === 'object' && data !== null && Object.keys(data).length > 0) {
+        if (typeof data === 'object' && data !== null && data['status'] == "online") {
             //console.log(`✅ Server is up: ${url}`);
         } else {
             throw new Error('Invalid response format');
@@ -64,9 +104,11 @@ function sendAlertEmail(url, errorMsg) {
 // Run checks every 5 minutes for each URL
 function runChecks() {
     CHECK_URLS.forEach(checkServer);
+    checkValidator();
 }
 
 // Start checking immediately and every 5 minutes
-setInterval(runChecks, CHECK_INTERVAL);
+//setInterval(runChecks, CHECK_INTERVAL);
 runChecks();
+checkValidator();
 console.log("Monitor Service Started.");
