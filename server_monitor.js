@@ -4,12 +4,20 @@ require('dotenv').config();
 const fs = require('fs');
 
 
-const CHECK_URLS = process.env.CHECK_URLS ? process.env.CHECK_URLS.split('|') : [];
-const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const CHECK_URLS = process.env.CHECK_URLS ? process.env.CHECK_URLS.split(',') : [];
+const CHECK_INTERVAL = 15 * 60 * 1000; // N minutes
 const ALERT_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
 
 // Track last alert timestamp for each URL
 let lastAlertTimestamps = {};
+
+const chargers = [ 
+   {
+     'url':`https://api.gridspot.co/rest/charger_statuses?api_key=${process.env.CHARGER_STATUS_API_KEY}`,
+     'cids': ["1001","1013"]
+    },
+]
+
 
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_SERVER,
@@ -21,11 +29,11 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-function checkValidator() {
+async function checkValidator() {
+   const now = Date.now();
    var bData = [];
    const unixTimestamp = Math.floor(Date.now() / 1000);
-   try {
-      fs.readFile('/usr/share/nginx/html/mini/current.txt', 'utf8', (err, data) => {
+   fs.readFile('/usr/share/nginx/html/mini/current.txt', 'utf8', (err, data) => {
          if (err) {
             console.error('Error reading file:', err);
             return;
@@ -36,28 +44,64 @@ function checkValidator() {
       myTimestamp = parseInt(bData[2]);
 
       if (myBlock < officialBlock) {
-            throw new Error('Mini server block age out of sync!');
+          // Check if 4 hours have passed since the last alert for this URL
+          if (!lastAlertTimestamps["miniserver"] || (now - lastAlertTimestamps["miniserver"] >= ALERT_INTERVAL)) {
+            sendAlertEmail("miniserver", "Blocks Out of Sync!");
+            lastAlertTimestamps["miniserver"] = now;
+          } else {
+	    //console.log(`⚠️ Alert already sent for mini in the last 4 hours. Skipping email.`);
+          }
+
+       }
+       else if (Math.abs(unixTimestamp-myTimestamp)/60 > 10) {
+           // Check if 4 hours have passed since the last alert for this URL
+           if (!lastAlertTimestamps["miniserver"] || (now - lastAlertTimestamps["miniserver"] >= ALERT_INTERVAL)) {
+             sendAlertEmail("miniserver", "Timestamp Expired!");
+             lastAlertTimestamps["miniserver"] = now;
+           } else {
+            //console.log(`⚠️ Alert already sent for mini in the last 4 hours. Skipping email.`);
         }
-      else if (Math.abs(unixTimestamp-myTimestamp)/60 > 10) {
-            throw new Error('Mini server timed out! (10 minutes+)');
-        }
-      });
+
+       }
+   });
+
+}
+
+async function checkChargers() {
+    let url = ""
+    let chargerId = "";
+    let errorCids = [];
+
+    try {
+      for (const charger of chargers) {
+
+        url = charger['url']
+        const response = await axios.get(url, { timeout: 10000 }); // 10s timeout
+        const data = response.data;
+        charger['cids'].forEach(cid =>{
+              if (!data['cid'] || data[cid] == "Faulted") {
+		  errorCids.push(cid);
+              }
+           })
+      }		   
+
+       if (errorCids.length > 0)
+          throw new Error(`Chargers ${errorCids.join(",")} are Offine!`);
 
     } catch (error) {
-
-        console.log(error)
         //console.error(`❌ Server check failed: ${url} - ${error.message}`);
         const now = Date.now();
 
-        // Check if 4 hours have passed since the last alert for this URL
-        if (!lastAlertTimestamps["miniserver"] || now - lastAlertTimestamps["miniserver"] >= ALERT_INTERVAL) {
-            sendAlertEmail("miniserver", error.message);
-            lastAlertTimestamps["miniserver"] = now;
+        // Check if 4 hours have passed since the last alert for this cid
+        if (!lastAlertTimestamps[url+errorCids] || now - lastAlertTimestamps[url+errorCids] >= ALERT_INTERVAL) {
+            sendAlertEmail(url.split("?")[0], error.message,"Charger");
+            lastAlertTimestamps[url+errorCids] = now;
         } else {
             //console.log(`⚠️ Alert already sent for ${url} in the last 4 hours. Skipping email.`);
         }
     }
 }
+
 
 
 async function checkServer(url) {
@@ -84,14 +128,13 @@ async function checkServer(url) {
     }
 }
 
-function sendAlertEmail(url, errorMsg) {
+function sendAlertEmail(url, errorMsg, type="Server") {
     const mailOptions = {
         from: process.env.EMAIL_FROM,
         to: process.env.EMAIL_TO,
-        subject: `🚨 Server Down Alert: ${url}`,
-        text: `The server at ${url} is down.\nError: ${errorMsg}`
+        subject: `🚨 ${type} Down Alert: ${url}`,
+        text: `The ${type} with ${url} is down.\nError: ${errorMsg}`
     };
-
     transporter.sendMail(mailOptions, (error, info) => {
         if (error) {
             console.error(`Error sending email for ${url}:`, error);
@@ -101,14 +144,13 @@ function sendAlertEmail(url, errorMsg) {
     });
 }
 
-// Run checks every 5 minutes for each URL
+// Run checks every n minutes for each URL
 function runChecks() {
     CHECK_URLS.forEach(checkServer);
     checkValidator();
+    checkChargers();
 }
 
-// Start checking immediately and every 5 minutes
-//setInterval(runChecks, CHECK_INTERVAL);
-runChecks();
-checkValidator();
+// Start checking immediately and every n minutes
+setInterval(runChecks, CHECK_INTERVAL);
 console.log("Monitor Service Started.");
