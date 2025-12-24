@@ -79,7 +79,7 @@ async function checkChargers() {
         const response = await axios.get(url, { timeout: 10000 }); // 10s timeout
         const data = response.data;
         charger['cids'].forEach(cid =>{
-              if (!data['cid'] || data[cid] == "Faulted") {
+              if (!data[cid] || data[cid] == "Faulted") {
 		  errorCids.push(cid);
               }
            })
