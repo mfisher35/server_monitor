@@ -10,11 +10,13 @@ const ALERT_INTERVAL = 4 * 60 * 60 * 1000; // 4 hours
 
 // Track last alert timestamp for each URL
 let lastAlertTimestamps = {};
+let downCount = {};
+
 
 const chargers = [ 
    {
      'url':`https://api.gridspot.co/rest/charger_statuses?api_key=${process.env.CHARGER_STATUS_API_KEY}`,
-     'cids': ["1001","1013"]
+     'cids': ["1001"], //,"1013"]
     },
 ]
 
@@ -91,11 +93,13 @@ async function checkChargers() {
     } catch (error) {
         //console.error(`❌ Server check failed: ${url} - ${error.message}`);
         const now = Date.now();
-
+        const code = url+errorCids.join(',');
+        downCount[code] = downCount[code] ? downCount[code] + 1 : 1
         // Check if 4 hours have passed since the last alert for this cid
-        if (!lastAlertTimestamps[url+errorCids] || now - lastAlertTimestamps[url+errorCids] >= ALERT_INTERVAL) {
+        if (!lastAlertTimestamps[code] || now - lastAlertTimestamps[code] >= ALERT_INTERVAL) {
             sendAlertEmail(url.split("?")[0], error.message,"Charger");
-            lastAlertTimestamps[url+errorCids] = now;
+            lastAlertTimestamps[code] = now;
+	    downCount[code] = 0
         } else {
             //console.log(`⚠️ Alert already sent for ${url} in the last 4 hours. Skipping email.`);
         }
@@ -117,9 +121,10 @@ async function checkServer(url) {
     } catch (error) {
         //console.error(`❌ Server check failed: ${url} - ${error.message}`);
         const now = Date.now();
-
-        // Check if 4 hours have passed since the last alert for this URL
-        if (!lastAlertTimestamps[url] || now - lastAlertTimestamps[url] >= ALERT_INTERVAL) {
+        downCount[url] = downCount[url] ? downCount[url] + 1 : 1;
+        // Check if the url is down more than once and 4 hours have passed since the last alert for this URL
+        if (downCount[url] > 1 && (!lastAlertTimestamps[url] || now - lastAlertTimestamps[url] >= ALERT_INTERVAL)) {
+	    downCount[url] = 0;
             sendAlertEmail(url, error.message);
             lastAlertTimestamps[url] = now;
         } else {
