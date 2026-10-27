@@ -153,7 +153,8 @@ function sendAlertEmail(url, errorMsg, type="Server") {
 function runChecks() {
     CHECK_URLS.forEach(checkServer);
     checkValidator();
-    checkChargers();
+    // Charger alerts now handled by the dashboard backend's Monitoring tab (server.cjs runChargerMonitor)
+    //checkChargers();
 }
 
 // Start checking immediately and every n minutes
